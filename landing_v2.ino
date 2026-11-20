@@ -19,6 +19,9 @@ constexpr int SD_MISO = 5;
 constexpr int SD_MOSI = 6;
 constexpr int SD_CS   = 7;
 
+// E match pin number
+constexpr int EMATCH = 8;
+
 // Timing
 constexpr uint32_t SAMPLE_MS = 100;
 constexpr uint32_t FLUSH_MS = 1000;
@@ -86,10 +89,10 @@ constexpr int SERVO_STOP = 1500;
 constexpr int SERVO_FORWARD = 1700;
 constexpr int SERVO_REVERSE = 1300;
 
-constexpr uint32_t SERVO_RUN_MS = 2000;
+constexpr uint32_t SERVO_RUN_MS = 300000;
 
-constexpr int SERVO_MAX_FORWARD = 2000;
-constexpr int SERVO_MAX_REVERSE = 1000;
+constexpr int SERVO_MAX_FORWARD = 2500;
+constexpr int SERVO_MAX_REVERSE = 500;
 
 Servo myServo;
 
@@ -222,7 +225,7 @@ bool readAltitude(float &altitude) {
 void initializeServo() {
   myServo.setPeriodHertz(50);
 
-  if (!myServo.attach(SERVO_PIN, 500, 2500);) {
+  if (!myServo.attach(SERVO_PIN, 500, 2500)) {
     halt("ERROR: Servo initialization failed");
   }
 
@@ -254,6 +257,17 @@ void updateServo(uint32_t now) {
   if (servoRunning &&
       now - servoStart >= SERVO_RUN_MS) {
     stopServo();
+    if (logFile) {
+      logFile.printf(
+        "%lu,%.3f,%s,%d\n",
+        (unsigned long)now,
+        0.0f,
+        "SERVO_STOPPED",
+        servoRunning
+      );
+
+      logFile.flush();
+    }
   }
 }
 
@@ -342,8 +356,21 @@ void recordLandingEvent(uint32_t now) {
   }
 }
 
-void fireMatch();
-void spinServo();
+void fireMatch(uint32_t now) {
+  digitalWrite(EMATCH, HIGH);
+  // Record E-match fired
+  if (logFile) {
+    logFile.printf(
+      "%lu,%.3f,%s,%d\n",
+      (unsigned long)now,
+      0.0f,
+      "EMATCH_FIRED",
+      1
+    );
+
+    logFile.flush();
+  }
+}
 
 void landingEvent(uint32_t now) {
 
@@ -360,8 +387,19 @@ void landingEvent(uint32_t now) {
   recordLandingEvent(now);
 
   // Post-landing actions can be coordinated here.
-  fireMatch();
-  spinServo();
+  fireMatch(now);
+  servoForwardMax();
+  if (logFile) {
+    logFile.printf(
+      "%lu,%.3f,%s,%d\n",
+      (unsigned long)now,
+      0.0f,
+      "SERVO_STARTED",
+      servoRunning
+    );
+
+    logFile.flush();
+  }
 }
 
 // =====================================================
@@ -410,8 +448,6 @@ void detectLanding(float altitude, uint32_t now) {
     state = LANDED;
 
     Serial.println("Landing detected");
-
-    landingEvent(now);
   }
 }
 
@@ -432,6 +468,7 @@ void updateFlight(float altitude, uint32_t now) {
       break;
 
     case LANDED:
+      landingEvent(now);
       // Remain landed until reset.
       break;
   }
@@ -530,6 +567,10 @@ void setup() {
   // Initialize hardware.
   initializeServo();
   initializeBMP();
+
+  // Initialize pin for E-match
+  pinMode(EMATCH, OUTPUT);
+  digitalWrite(EMATCH, LOW);
 
   // Establish ground altitude reference.
   calibrateGroundAltitude();
